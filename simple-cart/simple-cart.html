@@ -1,0 +1,183 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Cart</title>
+    <link rel="stylesheet" href="https://static.comecero.com/libraries/bootstrap/3.3.5/css/bootstrap.min.css" />
+    <link href="simple-cart.css" rel="stylesheet" />
+    <script src="https://static.comecero.com/libraries/jquery/2.1.4/jquery.min.js"></script>
+    <script>
+        $(document).ready(function () {
+
+            var account_id = ""; // Indicates the account you will be using, such as "AA0000".
+            var test = true; // Indicates if you want to run the test against the live or test account. If test is false, you will need to provide a real credit card and the card will be billed.
+            var api_host = "api.comecero.com"; // Indicates the API host you wish to use. You generally shouldn't need to change this.
+
+            if (!account_id) {
+                $("body").prepend('<div class="alert alert-warning spacer-t20 text-center"><strong>To run this page, you must provide your account ID on line 11 of the source code of this page.</strong></div>');
+            }
+
+            // Set up your variables
+            var token, products = [], cart = {}, payment = {};
+
+            // This is a function that we use to communicate with the API.
+            function sendRequest(url, method, token, data, onSuccess, onError) {
+
+                // Clear any existing errors
+                $("#error").hide();
+
+                // Set up your options
+                var options = { url: url, method: method, dataType: "json" };
+                if (onSuccess)
+                    options.success = function (response) { onSuccess(response); }
+                if (token)
+                    options.beforeSend = function (xhr) { xhr.setRequestHeader("Authorization", "Bearer " + token); };
+                if (data)
+                    options.data = JSON.stringify(data);
+
+                // Handle errors
+                options.error = function (error) {
+                    $("#error").html("Error: " + error.responseJSON.error.message);
+                    $("#error").show();
+                }
+
+                // Send your request
+                $.ajax(options);
+            }
+
+            // This function takes data from an object and sets it in the DOM.
+            function setData(obj) {
+                $.each(obj, function (i, n) {
+                    $("#" + i).html(n);
+                });
+            }
+
+            // Create a session token for the user, then use it to get a list of products from the account.
+            sendRequest("https://" + api_host + "/api/v1/auths/limited?account_id=" + account_id + "&test=" + test, "POST", null, null, function (auth) {
+                token = auth.token;
+                sendRequest("https://" + api_host + "/api/v1/products?limit=5&formatted=true", "GET", token, null, function (products) {
+                    // Loop the products and append to the document.
+                    for (var i = 0; i < products.data.length; i++) {
+                        $(".products").append('<div class="col-xs-12 col-sm-4 text-center spacer-b20"><img class="product-icon" src="' + products.data[i].images[0].link_square + '"><div class="spacer-b10">' + products.data[i].name + ' • ' + products.data[i].formatted.price + '</div><button name="add-to-cart" data-product-id = "' + products.data[i].product_id + '" class="btn btn-default">Add to Cart</button></button>')
+                    }
+                });
+            });
+
+            // A function that creates / updates the cart
+            var setCart = function (payload) {
+                var url = cart.url || "https://" + api_host + "/api/v1/carts";
+                url += "?expand=items.product.images&formatted=true";
+                sendRequest(url, "POST", token, cart, function (response) {
+                    cart = response;
+                    // Refresh the items in the cart
+                    $("#items").empty('');
+                    for (var i = 0; i < cart.items.length; i++) {
+                        $("#items").append('<tr><td style="padding-top:15px;" class="text-left"><img class="product-icon" src="' + cart.items[i].product.images[0].link_square + '" /></td><td>' + cart.items[i].name + '</td><td class="text-center has-input">' + cart.items[i].quantity + '</td><td class="text-right">' + cart.items[i].formatted.subtotal + '</td></tr>')
+                    }
+                    $("#items").append('<td colspan="4" class="text-right"><h2>Total: ' + cart.formatted.total + '</h2></td>');
+                    $("#checkout").show();
+                });
+            }
+
+            // Add an item to the cart
+            $(document).on("click", "button[name='add-to-cart']", function (e) {
+                cart.items = cart.items || [];
+                cart.items.push({ product_id: $(e.target).attr("data-product-id") });
+                setCart(cart);
+            });
+
+            // Submit a payment
+            $("#pay").on("click", function () {
+
+                // Add the customer data
+                payment.customer = { name: $("#name").val(), email: $("#email").val(), billing_address: { postal_code: $("#postal_code").val(), country: $("#country").val() } };
+
+                // Add the payment method
+                payment.payment_method = { type: "credit_card", data: { number: $("#number").val(), exp_month: Number($("#exp_month").val()), exp_year: Number($("#exp_year").val()), cvv: $("#cvv").val(), } };
+
+                // Send the payment to the API
+                sendRequest(cart.url + "/payments?formatted=true&expand=customer,order", "POST", token, payment, function (response) {
+                    setData({ order_id: response.order.order_id, r_email: response.customer.email, subtotal: response.formatted.subtotal, tax: response.formatted.tax, total: response.formatted.total });
+                    $("#cart").hide();
+                    $("#receipt").show();
+                });
+
+            });
+        });
+
+    </script>
+</head>
+<body>
+
+    <div class="container" style="max-width:860px;">
+
+        <div id="cart">
+            <div id="error" class="alert alert-danger spacer-t20" style="display:none;"></div>
+
+            <h1>Products</h1>
+            <hr />
+            <div class="products"></div>
+
+            <div class="row"></div>
+
+            <div id="checkout" style="display:none;">
+                <h1>Items</h1>
+                <hr />
+
+                <table style="width:100%">
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Name</th>
+                            <th class="text-center">Quantity</th>
+                            <th class="text-right">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody id="items"></tbody>
+                </table>
+
+                <div class="row"></div>
+
+                <h1>Pay</h1>
+                <hr />
+                <div class="col-xs-12 form-group"><input class="form-control" type="text" id="name" placeholder="Name" /></div>
+                <div class="col-xs-12 col-md-6 form-group"><input class="form-control" type="text" id="email" placeholder="Email Address" /></div>
+                <div class="col-xs-12 col-md-6 form-group"><input class="form-control" type="text" id="postal_code" placeholder="Postal Code" /></div>
+                <div class="col-xs-12 form-group"><input class="form-control" type="text" id="country" placeholder="Country" /></div>
+                <div class="col-xs-12 form-group"><input class="form-control" type="text" id="number" placeholder="Card Number" /></div>
+                <div class="col-xs-12 col-md-4 form-group"><input class="form-control" type="text" id="exp_month" placeholder="Month" /></div>
+                <div class="col-xs-12 col-md-4 form-group"><input class="form-control" type="text" id="exp_year" placeholder="Year" /></div>
+                <div class="col-xs-12 col-md-4 form-group"><input class="form-control" type="text" id="cvv" placeholder="CVV" /></div>
+                <div class="col-xs-12 form-group text-right"><span id="pay" class="btn btn-lg btn-success">Complete Order</span></div>
+            </div>
+        </div>
+
+        <div id="receipt" style="display:none;">
+            <div id="error" class="alert alert-success spacer-t20">Success! Your order has been completed.</div>
+            <p>Order ID: <span id="order_id"></span></p>
+            <p id="r_email"></p>
+            <table style="width:100%">
+                <tbody>
+                    <tr>
+                        <td class="text-left"><strong>Subtotal</strong></td>
+                        <td id="subtotal" class="text-right"></td>
+                    </tr>
+                </tbody>
+                <tbody>
+                    <tr>
+                        <td class="text-left"><strong>Tax</strong></td>
+                        <td id="tax" class="text-right"></td>
+                    </tr>
+                </tbody>
+                <tbody>
+                    <tr>
+                        <td class="text-left"><strong>Total</strong></td>
+                        <td id="total" class="text-right"></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+</body>
+</html>
